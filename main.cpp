@@ -1,27 +1,39 @@
 #include <QApplication>
+#include <QMainWindow>
+#include <QStatusBar>
+#include <vector>
+#include <random>
 #include "polarpywidget.h"
+
+static std::vector<unsigned char> generateData(int rows, int cols)
+{
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<int> dist(0, 255);
+    std::vector<unsigned char> buf(rows * cols);
+    for (auto& v : buf) v = static_cast<unsigned char>(dist(rng));
+    return buf;
+}
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
 
-    PolarPyWidget w;
+    QMainWindow win;
+    win.setWindowTitle("Polar Heatmap Widget — Day 3 (Guide Review Update)");
 
-    // Configure range
-    w.setMinRange(0);
-    w.setMaxRange(100);
+    PolarPyWidget* w = new PolarPyWidget;
+    w->setMinRange(0);
+    w->setMaxRange(100);
+    w->setStartAngle(0);
+    w->setEndAngle(360);   // try 180 or 90 to test dynamic layout
 
-    // Configure angle (full circle)
-    w.setStartAngle(0);
-    w.setEndAngle(360);
+    auto buf = generateData(8, 16);
+    w->plotData(reinterpret_cast<char*>(buf.data()), 8, 16);
 
-    // Grid density
-    w.setRadialBins(5);
-    w.setAngularBins(12);
-
-    w.setWindowTitle("Polar Heatmap Widget — Day 2");
-    w.resize(800, 600);
-    w.show();
-
+    win.setCentralWidget(w);
+    win.statusBar()->showMessage(
+        "OpenGL 3.3 Core | VBO rendering | Range labels | Dynamic layout");
+    win.resize(900, 700);
+    win.show();
     return a.exec();
 }

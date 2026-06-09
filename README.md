@@ -1,32 +1,19 @@
-# Polar Heatmap Widget — Day 2
+# Polar Heatmap Widget — Day 3 (Guide Review Update)
 
-**Project:** Polar Heatmap Widget using Qt and OpenGL  
 **Student:** Anushka Das
 
 ---
 
-## Day 2 — Work Completed
+## Changes Applied (Guide Feedback)
 
-| # | Task | Status |
-|---|------|--------|
-| 1 | Created `PolarPyWidget` class | ✓ Done |
-| 2 | Implemented polar coordinate calculations | ✓ Done |
-| 3 | Drew concentric ring circles | ✓ Done |
-| 4 | Drew radial spoke lines | ✓ Done |
-| 5 | Configurable `setMinRange()` and `setMaxRange()` | ✓ Done |
-| 6 | Configurable `setStartAngle()` and `setEndAngle()` | ✓ Done |
-| 7 | Polar grid visualisation complete | ✓ Done |
-
----
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `CMakeLists.txt` | Build config |
-| `polarpywidget.h` | PolarPyWidget class declaration |
-| `polarpywidget.cpp` | Polar grid rendering implementation |
-| `main.cpp` | Application entry point |
+| # | Change | Status |
+|---|--------|--------|
+| 1 | Upgraded to OpenGL 3.3 Core Profile | ✓ Done |
+| 2 | Range labels on concentric rings | ✓ Done |
+| 3 | Replaced glBegin/glEnd with VBO + VAO | ✓ Done |
+| 4 | Qt texture support (background texture) | ✓ Done |
+| 5 | Proper destructor with GL resource cleanup | ✓ Done |
+| 6 | Dynamic screen utilization for any angular span | ✓ Done |
 
 ---
 
@@ -41,7 +28,8 @@ make -j4
 
 ---
 
-## Day 3 Plan
-- Accept 2D data buffer via `plotData()`
-- Implement heatmap colour mapping (value → colour)
-- Render coloured sectors for each data cell
+## Test dynamic layout
+
+In `main.cpp`, change `setEndAngle(360)` to:
+- `setEndAngle(180)` — half circle, fills top half
+- `setEndAngle(90)`  — quarter circle, fills top-right

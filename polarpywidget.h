@@ -1,43 +1,62 @@
 #pragma once
 
 #include <QOpenGLWidget>
-#include <QOpenGLFunctions>
+#include <QOpenGLFunctions_3_3_Core>
+#include <QOpenGLBuffer>
+#include <QOpenGLVertexArrayObject>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLTexture>
+#include <QColor>
+#include <QMatrix4x4>
+#include <vector>
+#include <string>
 
 /**
- * PolarPyWidget
+ * PolarPyWidget — Day 3 (Guide Review Update)
  *
- * Day 2 — Polar grid visualisation.
+ * Changes applied per guide feedback:
+ *   1. Upgraded to modern OpenGL 3.3 Core Profile
+ *   2. Range labels drawn on concentric rings
+ *   3. glBegin/glEnd replaced with VBOs + VAOs
+ *   4. Qt texture support integrated (background texture)
+ *   5. Proper destructor added for resource cleanup
+ *   6. Dynamic screen utilization based on angular span
  *
- * Extends the Day 1 OpenGL widget foundation into a proper
- * polar coordinate widget. Draws concentric rings and radial
- * spoke lines based on configurable range and angle settings.
- *
- * Day 3+ will add: heatmap data, colour mapping, interaction.
+ * Original Day 3 features retained:
+ *   - plotData()        : accepts 2D data buffer
+ *   - mapValueToColor() : heatmap colour mapping 0-255
+ *   - Filled coloured sectors per data cell
+ *   - Polar grid overlay (rings + spokes)
+ *   - Input validation
  */
-class PolarPyWidget : public QOpenGLWidget, protected QOpenGLFunctions
+class PolarPyWidget : public QOpenGLWidget,
+                      protected QOpenGLFunctions_3_3_Core
 {
     Q_OBJECT
 
 public:
+    // -------------------------------------------------------
+    // Change 5: explicit destructor (guide requirement)
+    // -------------------------------------------------------
     explicit PolarPyWidget(QWidget* parent = nullptr);
-    ~PolarPyWidget() override = default;
+    ~PolarPyWidget();
 
-    // --- Range configuration ---
+    // --- Data input ---
+    void plotData(char* data, int radialBins, int angularBins);
+
+    // --- Colour mapping ---
+    static QColor mapValueToColor(int value);
+
+    // --- Range / angle config ---
     void setMinRange(float value);
     void setMaxRange(float value);
-
-    // --- Angle configuration ---
     void setStartAngle(float degrees);
     void setEndAngle(float degrees);
 
-    // --- Grid density ---
-    void setRadialBins(int bins);
-    void setAngularBins(int bins);
-
-    float minRange()    const { return m_minRange; }
-    float maxRange()    const { return m_maxRange; }
-    float startAngle()  const { return m_startAngle; }
-    float endAngle()    const { return m_endAngle; }
+    float minRange()   const { return m_minRange; }
+    float maxRange()   const { return m_maxRange; }
+    float startAngle() const { return m_startAngle; }
+    float endAngle()   const { return m_endAngle; }
 
 protected:
     void initializeGL() override;
@@ -45,24 +64,70 @@ protected:
     void paintGL() override;
 
 private:
-    // Draws concentric ring arcs
-    void drawRings();
+    // --- Rendering ---
+    void buildSectorVBO();      // Change 3: build VBO for all sectors
+    void buildGridVBO();        // Change 3: build VBO for grid lines
+    void drawSectors();
+    void drawGrid();
+    void drawRangeLabels();     // Change 2: range label rendering
 
-    // Draws radial spoke lines
-    void drawSpokes();
+    // --- Shaders ---
+    bool initShaders();
 
-    // Converts polar (r, theta_degrees) to Cartesian (x, y) in pixel space
-    void polarToCartesian(float r, float thetaDeg, float& x, float& y) const;
+    // --- Compute draw bounds based on angular span ---
+    // Change 6: dynamic screen utilization
+    void computeDrawBounds(float& scaleOut,
+                           float& offsetXOut,
+                           float& offsetYOut) const;
 
-    // Configuration
-    float m_minRange    =   0.0f;
-    float m_maxRange    = 100.0f;
-    float m_startAngle  =   0.0f;
-    float m_endAngle    = 360.0f;
-    int   m_radialBins  =    5;
-    int   m_angularBins =   12;
+    bool validate();
 
-    // Viewport size (updated in resizeGL)
+    // -------------------------------------------------------
+    // Modern OpenGL objects (Change 1 + 3)
+    // -------------------------------------------------------
+    QOpenGLShaderProgram* m_program     = nullptr;
+
+    // Sector geometry
+    QOpenGLVertexArrayObject m_sectorVAO;
+    QOpenGLBuffer            m_sectorVBO;
+    int                      m_sectorVertexCount = 0;
+
+    // Grid geometry
+    QOpenGLVertexArrayObject m_gridVAO;
+    QOpenGLBuffer            m_gridVBO;
+    int                      m_gridVertexCount = 0;
+
+    // Change 4: Qt texture for background
+    QOpenGLTexture* m_bgTexture = nullptr;
+
+    // Uniform locations
+    int m_uMVP       = -1;
+    int m_uUseColor  = -1;
+    int m_uTexture   = -1;
+
+    // MVP matrix
+    QMatrix4x4 m_projection;
+
+    // -------------------------------------------------------
+    // Data
+    // -------------------------------------------------------
+    std::vector<unsigned char> m_data;
+    int m_radialBins  = 0;
+    int m_angularBins = 0;
+
+    // Config
+    float m_minRange   =   0.0f;
+    float m_maxRange   = 100.0f;
+    float m_startAngle =   0.0f;
+    float m_endAngle   = 360.0f;
+
+    // Viewport
     int m_width  = 1;
     int m_height = 1;
+
+    bool m_vboDirty = true;   // rebuild VBOs when data changes
+
+    std::string m_errorMsg;
+
+    static constexpr int ARC_STEPS = 24;
 };
