@@ -1,6 +1,5 @@
 # Polar Heatmap Widget — Final Release
 
-**Student:** Anushka Das  
 **Technology:** Qt 5.15 | C++17 | OpenGL 3.3 Core
 
 ## Build & Run
@@ -15,15 +14,15 @@ make -j4
 
 | Feature | Status |
 |---------|--------|
-| OpenGL 3.3 Core Profile | ✓ |
-| VBO/VAO rendering | ✓ |
-| Heatmap colour mapping | ✓ |
-| Range labels | ✓ |
-| Dynamic angular layout | ✓ |
-| Proper destructor | ✓ |
-| Qt texture | ✓ |
-| Zoom / Pan / Reset | ✓ |
-| Hover tooltip | ✓ |
-| Sector selection | ✓ |
-| Live animation | ✓ |
-| Control panel | ✓ |
+| OpenGL 3.3 Core Profile 
+| VBO/VAO rendering
+| Heatmap colour mapping 
+| Range labels 
+| Dynamic angular layout 
+| Proper destructor 
+| Qt texture
+| Zoom / Pan / Reset
+| Hover tooltip
+| Sector selection 
+| Live animation 
+| Control panel 
