@@ -8,26 +8,33 @@
 #include <QOpenGLTexture>
 #include <QColor>
 #include <QMatrix4x4>
+#include <QPoint>
 #include <vector>
 #include <string>
 
 /**
- * PolarPyWidget — Day 3 (Guide Review Update)
+ * PolarPyWidget  —  Final Release
  *
- * Changes applied per guide feedback:
- *   1. Upgraded to modern OpenGL 3.3 Core Profile
- *   2. Range labels drawn on concentric rings
- *   3. glBegin/glEnd replaced with VBOs + VAOs
- *   4. Qt texture support integrated (background texture)
- *   5. Proper destructor added for resource cleanup
- *   6. Dynamic screen utilization based on angular span
+ * Guide-review changes implemented:
+ *   1. OpenGL 3.3 Core Profile  (QSurfaceFormat CoreProfile)
+ *   2. Range labels on concentric rings
+ *   3. glBegin/glEnd replaced with VBO + VAO
+ *   4. Qt texture support  (QOpenGLTexture background)
+ *   5. Proper destructor with full GL resource cleanup
+ *   6. Dynamic screen utilization for any angular span
  *
- * Original Day 3 features retained:
- *   - plotData()        : accepts 2D data buffer
- *   - mapValueToColor() : heatmap colour mapping 0-255
- *   - Filled coloured sectors per data cell
- *   - Polar grid overlay (rings + spokes)
- *   - Input validation
+ * Full feature set:
+ *   - plotData()          : load 2D data buffer
+ *   - mapValueToColor()   : Blue→Cyan→Green→Yellow→Red
+ *   - Filled heatmap sectors (GL_TRIANGLE_STRIP)
+ *   - Polar grid overlay  (rings + spokes, VBO)
+ *   - Range labels (QPainter overlay)
+ *   - Zoom (wheel), Pan (drag), Reset (double-click)
+ *   - Hover tooltip  (ring / sector / value)
+ *   - Sector selection with highlight
+ *   - Qt signals: sectorSelected, sectorHovered
+ *   - Dynamic bounding-box layout
+ *   - Live animation support (call plotData() repeatedly)
  */
 class PolarPyWidget : public QOpenGLWidget,
                       protected QOpenGLFunctions_3_3_Core
@@ -35,19 +42,15 @@ class PolarPyWidget : public QOpenGLWidget,
     Q_OBJECT
 
 public:
-    // -------------------------------------------------------
-    // Change 5: explicit destructor (guide requirement)
-    // -------------------------------------------------------
     explicit PolarPyWidget(QWidget* parent = nullptr);
-    ~PolarPyWidget();
+    ~PolarPyWidget();   // Change 5: proper destructor
 
-    // --- Data input ---
+    // ── Data ────────────────────────────────────────────
     void plotData(char* data, int radialBins, int angularBins);
-
-    // --- Colour mapping ---
     static QColor mapValueToColor(int value);
+    static std::vector<unsigned char> generateTestData(int rows, int cols);
 
-    // --- Range / angle config ---
+    // ── Configuration ───────────────────────────────────
     void setMinRange(float value);
     void setMaxRange(float value);
     void setStartAngle(float degrees);
@@ -58,76 +61,94 @@ public:
     float startAngle() const { return m_startAngle; }
     float endAngle()   const { return m_endAngle; }
 
+    // ── Interaction state ────────────────────────────────
+    int selectedRing()   const { return m_selectedRing; }
+    int selectedSector() const { return m_selectedSector; }
+    void resetView();
+
+signals:
+    void sectorSelected(int ring, int sector, int value);
+    void sectorHovered (int ring, int sector, int value);
+
 protected:
-    void initializeGL() override;
-    void resizeGL(int width, int height) override;
-    void paintGL() override;
+    // ── Qt OpenGL lifecycle ──────────────────────────────
+    void initializeGL()              override;
+    void resizeGL(int w, int h)      override;
+    void paintGL()                   override;
+
+    // ── Mouse events ─────────────────────────────────────
+    void wheelEvent(QWheelEvent* e)        override;
+    void mousePressEvent(QMouseEvent* e)   override;
+    void mouseMoveEvent(QMouseEvent* e)    override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
+    void mouseDoubleClickEvent(QMouseEvent* e) override;
 
 private:
-    // --- Rendering ---
-    void buildSectorVBO();      // Change 3: build VBO for all sectors
-    void buildGridVBO();        // Change 3: build VBO for grid lines
-    void drawSectors();
-    void drawGrid();
-    void drawRangeLabels();     // Change 2: range label rendering
-
-    // --- Shaders ---
+    // ── Shader setup ────────────────────────────────────
     bool initShaders();
 
-    // --- Compute draw bounds based on angular span ---
-    // Change 6: dynamic screen utilization
-    void computeDrawBounds(float& scaleOut,
-                           float& offsetXOut,
-                           float& offsetYOut) const;
+    // ── VBO builders  (Change 3) ────────────────────────
+    void buildSectorVBO();
+    void buildGridVBO();
 
+    // ── Draw calls ──────────────────────────────────────
+    void drawSectors();
+    void drawGrid();
+    void drawRangeLabels();  // Change 2
+    void drawOverlay();      // hover tooltip + status text
+
+    // ── Coordinate helpers ───────────────────────────────
+    bool pixelToPolar(const QPoint& px, float& r, float& theta) const;
+    bool polarToCell (float r, float theta, int& ring, int& sector) const;
+    void computeDrawBounds(float& scale, float& ox, float& oy) const; // Change 6
+
+    // ── Validation ──────────────────────────────────────
     bool validate();
 
-    // -------------------------------------------------------
-    // Modern OpenGL objects (Change 1 + 3)
-    // -------------------------------------------------------
-    QOpenGLShaderProgram* m_program     = nullptr;
-
-    // Sector geometry
+    // ── Modern GL objects  (Change 1 + 3 + 4) ───────────
+    QOpenGLShaderProgram*    m_program   = nullptr;
     QOpenGLVertexArrayObject m_sectorVAO;
-    QOpenGLBuffer            m_sectorVBO;
-    int                      m_sectorVertexCount = 0;
-
-    // Grid geometry
+    QOpenGLBuffer            m_sectorVBO{QOpenGLBuffer::VertexBuffer};
     QOpenGLVertexArrayObject m_gridVAO;
-    QOpenGLBuffer            m_gridVBO;
-    int                      m_gridVertexCount = 0;
+    QOpenGLBuffer            m_gridVBO  {QOpenGLBuffer::VertexBuffer};
+    QOpenGLTexture*          m_bgTexture = nullptr;  // Change 4
 
-    // Change 4: Qt texture for background
-    QOpenGLTexture* m_bgTexture = nullptr;
+    int m_sectorVertexCount = 0;
+    int m_gridRingVerts     = 0;
+    int m_gridSpokeVerts    = 0;
+    int m_uMVP              = -1;
 
-    // Uniform locations
-    int m_uMVP       = -1;
-    int m_uUseColor  = -1;
-    int m_uTexture   = -1;
-
-    // MVP matrix
     QMatrix4x4 m_projection;
 
-    // -------------------------------------------------------
-    // Data
-    // -------------------------------------------------------
+    // ── Data ────────────────────────────────────────────
     std::vector<unsigned char> m_data;
     int m_radialBins  = 0;
     int m_angularBins = 0;
 
-    // Config
+    // ── Config ──────────────────────────────────────────
     float m_minRange   =   0.0f;
     float m_maxRange   = 100.0f;
     float m_startAngle =   0.0f;
     float m_endAngle   = 360.0f;
 
-    // Viewport
-    int m_width  = 1;
-    int m_height = 1;
+    // ── View transform ──────────────────────────────────
+    float   m_zoom      = 1.0f;
+    QPointF m_panOffset = {0, 0};
 
-    bool m_vboDirty = true;   // rebuild VBOs when data changes
+    // ── Interaction ─────────────────────────────────────
+    bool   m_dragging     = false;
+    QPoint m_lastMousePos;
+    int    m_hoveredRing   = -1;
+    int    m_hoveredSector = -1;
+    QPoint m_hoverPixel;
+    int    m_selectedRing   = -1;
+    int    m_selectedSector = -1;
 
+    // ── State ───────────────────────────────────────────
+    int         m_vpW = 1, m_vpH = 1;
+    bool        m_vboDirty = true;
     std::string m_errorMsg;
 
-    static constexpr int ARC_STEPS = 24;
+    static constexpr int ARC_STEPS = 28;
+    static constexpr int GRID_ARC  = 180;
 };

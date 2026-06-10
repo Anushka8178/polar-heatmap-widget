@@ -1,24 +1,9 @@
-# Polar Heatmap Widget — Day 3 (Guide Review Update)
+# Polar Heatmap Widget — Final Release
 
-**Student:** Anushka Das
-
----
-
-## Changes Applied (Guide Feedback)
-
-| # | Change | Status |
-|---|--------|--------|
-| 1 | Upgraded to OpenGL 3.3 Core Profile | ✓ Done |
-| 2 | Range labels on concentric rings | ✓ Done |
-| 3 | Replaced glBegin/glEnd with VBO + VAO | ✓ Done |
-| 4 | Qt texture support (background texture) | ✓ Done |
-| 5 | Proper destructor with GL resource cleanup | ✓ Done |
-| 6 | Dynamic screen utilization for any angular span | ✓ Done |
-
----
+**Student:** Anushka Das  
+**Technology:** Qt 5.15 | C++17 | OpenGL 3.3 Core
 
 ## Build & Run
-
 ```bash
 mkdir build && cd build
 cmake ..
@@ -26,10 +11,19 @@ make -j4
 ./PolarHeatmapWidget
 ```
 
----
+## All features implemented
 
-## Test dynamic layout
-
-In `main.cpp`, change `setEndAngle(360)` to:
-- `setEndAngle(180)` — half circle, fills top half
-- `setEndAngle(90)`  — quarter circle, fills top-right
+| Feature | Status |
+|---------|--------|
+| OpenGL 3.3 Core Profile | ✓ |
+| VBO/VAO rendering | ✓ |
+| Heatmap colour mapping | ✓ |
+| Range labels | ✓ |
+| Dynamic angular layout | ✓ |
+| Proper destructor | ✓ |
+| Qt texture | ✓ |
+| Zoom / Pan / Reset | ✓ |
+| Hover tooltip | ✓ |
+| Sector selection | ✓ |
+| Live animation | ✓ |
+| Control panel | ✓ |
