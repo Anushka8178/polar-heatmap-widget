@@ -12,8 +12,8 @@ make -j4
 
 ## All features implemented
 
-| Feature | Status |
-|---------|--------|
+| Feature |
+|---------|
 | OpenGL 3.3 Core Profile 
 | VBO/VAO rendering
 | Heatmap colour mapping 
