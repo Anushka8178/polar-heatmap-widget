@@ -1,0 +1,4 @@
+/home/anushka/Desktop/UnifiedWidget/build/CMakeFiles/UnifiedWidget.dir
+/home/anushka/Desktop/UnifiedWidget/build/CMakeFiles/edit_cache.dir
+/home/anushka/Desktop/UnifiedWidget/build/CMakeFiles/rebuild_cache.dir
+/home/anushka/Desktop/UnifiedWidget/build/CMakeFiles/UnifiedWidget_autogen.dir
