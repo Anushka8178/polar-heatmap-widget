@@ -67,6 +67,7 @@ void RasterStripWidget::setDataDimensions(int dataWidth, int dataHeight)
 void RasterStripWidget::plotData(const unsigned char* rows, int rowCount, int cols,
                                   ScrollMode mode, int targetRow)
 {
+    int lastStart = -1, lastCount = 0;
     if (mode == ScrollMode::PushFromTop)
     {
         const int n = std::min(rowCount, m_dataHeight);
@@ -76,6 +77,7 @@ void RasterStripWidget::plotData(const unsigned char* rows, int rowCount, int co
             std::memmove(m_buffer.data() + size_t(n)*size_t(m_dataWidth),
                          m_buffer.data(), size_t(keep)*size_t(m_dataWidth));
         std::memcpy(m_buffer.data(), src, size_t(n)*size_t(m_dataWidth));
+        lastStart = 0; lastCount = n;
     }
     else if (mode == ScrollMode::PushFromBottom)
     {
@@ -87,6 +89,7 @@ void RasterStripWidget::plotData(const unsigned char* rows, int rowCount, int co
                          size_t(keep)*size_t(m_dataWidth));
         std::memcpy(m_buffer.data() + size_t(keep)*size_t(m_dataWidth),
                     rows, size_t(n)*size_t(m_dataWidth));
+        lastStart = keep; lastCount = n;
     }
     else // Direct
     {
@@ -94,11 +97,18 @@ void RasterStripWidget::plotData(const unsigned char* rows, int rowCount, int co
         if (dstRow < 0) { srcRow += -dstRow; n -= -dstRow; dstRow = 0; }
         if (dstRow + n > m_dataHeight) n = m_dataHeight - dstRow;
         if (n > 0)
-            std::memcpy(m_buffer.data() + size_t(dstRow)*size_t(m_dataWidth),
-                        rows + size_t(srcRow)*size_t(cols),
-                        size_t(n)*size_t(m_dataWidth));
+        {
+                    std::memcpy(m_buffer.data() + size_t(dstRow)*size_t(m_dataWidth),
+                                rows + size_t(srcRow)*size_t(cols),
+                                size_t(n)*size_t(m_dataWidth));
+                    lastStart = dstRow; lastCount = n;
+        }
     }
+    m_lastRowStart = lastStart;
+    m_lastRowCount = lastCount;
     update();
+
+
 }
 
 void RasterStripWidget::plotData(const float* rows, int rowCount, int cols,
@@ -248,21 +258,31 @@ void RasterStripWidget::drawOverlay(QPainter& p)
         // ── Reference grid lines (matches polar widget grid style) ────────────
 
     // ── Reference grid lines (matches polar widget grid style) ────────────
-    p.setPen(QPen(QColor(180,180,180,90), 1.0));
-    for (float frac : fracs)
+    // ── Outer boundary only (internal grid removed) ────────────────────────
+    p.setPen(QPen(QColor(180,180,180,140), 1.2));
         {
-            float sx1, sy1, sx2, sy2;
-            applyZoomPan(x0 + frac*gridW, y0, sx1, sy1);
-            applyZoomPan(x0 + frac*gridW, y0 + gridH, sx2, sy2);
-            p.drawLine(QPointF(sx1,sy1), QPointF(sx2,sy2));
+            float bx1,by1,bx2,by2,bx3,by3,bx4,by4;
+            applyZoomPan(x0,        y0,        bx1,by1);
+            applyZoomPan(x0+gridW,  y0,        bx2,by2);
+            applyZoomPan(x0+gridW,  y0+gridH,  bx3,by3);
+            applyZoomPan(x0,        y0+gridH,  bx4,by4);
+            p.drawLine(QPointF(bx1,by1), QPointF(bx2,by2));
+            p.drawLine(QPointF(bx2,by2), QPointF(bx3,by3));
+            p.drawLine(QPointF(bx3,by3), QPointF(bx4,by4));
+            p.drawLine(QPointF(bx4,by4), QPointF(bx1,by1));
         }
-    for (float frac : fracs)
+        if (m_highlightLastUpdate && m_lastRowCount > 0 && cellH > 0.0f)
         {
-            float sx1, sy1, sx2, sy2;
-            applyZoomPan(x0, y0 + frac*gridH, sx1, sy1);
-            applyZoomPan(x0 + gridW, y0 + frac*gridH, sx2, sy2);
-            p.drawLine(QPointF(sx1,sy1), QPointF(sx2,sy2));
-    }
+                        p.save();
+                        const int edgeRow = m_lastRowStart + m_lastRowCount;
+                        const float hy = y0 + cellH * float(edgeRow);
+                        float hxA,hyA,hxB,hyB;
+                        applyZoomPan(x0,       hy, hxA, hyA);
+                        applyZoomPan(x0+gridW, hy, hxB, hyB);
+                        p.setPen(QPen(QColor(255,220,0,230), 2.0));
+                        p.drawLine(QPointF(hxA,hyA), QPointF(hxB,hyB));
+                        p.restore();
+        }
     // ── X-axis ticks + labels (bottom of grid) ────────────────────────────
     p.setPen(QPen(QColor(200,200,255,200), 1.5f));
     for (float frac : fracs)
@@ -294,7 +314,7 @@ void RasterStripWidget::drawOverlay(QPainter& p)
         p.drawLine(QPointF(sx, sy), QPointF(sx - tickLen, sy));
 
         // label
-        const QString lbl = QString::number(int(std::round((1.0f-frac) * m_logicalHeight)));
+        const QString lbl = QString::number(int(std::round(m_minRange + (1.0f-frac) * (m_maxRange - m_minRange))));
         const float tw = float(fm.horizontalAdvance(lbl));
         const float lx = std::max(1.0f, sx - tickLen - tw - 2.0f);
         const float ly = std::max(th, std::min(sy + th*0.3f, float(m_vpH)-2.0f));

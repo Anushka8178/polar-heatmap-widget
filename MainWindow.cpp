@@ -22,12 +22,12 @@ static constexpr float DATA_MAX             = 100.0f;
 // ─────────────────────────────────────────────────────────────────────────────
 // MainController
 // ─────────────────────────────────────────────────────────────────────────────
-MainController::MainController(PolarPyWidget* polar, RasterStripWidget* rect, QObject* parent)
-    : QObject(parent), m_polar(polar), m_rect(rect)
+MainController::MainController(PolarPyWidget* polar, RasterStripWidget* rect, RasterStripWidget* rectB, QObject* parent)
+    : QObject(parent), m_polar(polar), m_rect(rect), m_rectB(rectB)
 {
     m_polar->setCumulativeMode(false);
     m_timer = new QTimer(this);
-    m_timer->setInterval(100);
+    m_timer->setInterval(32);
     connect(m_timer, &QTimer::timeout, this, &MainController::updateData);
 }
 
@@ -49,7 +49,9 @@ void MainController::resetHistory()
 {
     m_polarHistory.clear();
     m_polar->clearCumulativeData();
-    m_rect->setDataDimensions(ANGULAR_SAMPLE_COUNT, RECT_HISTORY_ROWS);
+    // Rectangular A must match Polar's band count exactly (one frame = one ring = one strip)
+    m_rect->setDataDimensions(ANGULAR_SAMPLE_COUNT, POLAR_HISTORY_DEPTH);
+    m_rectB->setDataDimensions(ANGULAR_SAMPLE_COUNT, RECT_HISTORY_ROWS);
 }
 
 void MainController::updateData()
@@ -69,9 +71,34 @@ void MainController::updateData()
     m_rect->setMinRange(m_startRange);
     m_rect->setMaxRange(m_stopRange);
 
-    pushIntoPolarHistory(m_normalizedLines.data(), m_numberOfLines);
-    m_polar->plotData(m_polarHistory.data(), POLAR_HISTORY_DEPTH, ANGULAR_SAMPLE_COUNT);
-    m_rect->plotData(m_normalizedLines.data(), m_numberOfLines, ANGULAR_SAMPLE_COUNT,
+    if (!m_sweepInitialized)
+    {
+        m_polar->initSweepBuffer(POLAR_HISTORY_DEPTH, ANGULAR_SAMPLE_COUNT);
+        m_sweepRing = 0;
+        m_sweepInitialized = true;
+    }
+
+    for (int i = 0; i < m_numberOfLines; ++i)
+    {
+        const float* line = m_normalizedLines.data() + size_t(i) * ANGULAR_SAMPLE_COUNT;
+
+        std::vector<unsigned char> byteLine(static_cast<size_t>(ANGULAR_SAMPLE_COUNT), 0);
+        for (int s = 0; s < ANGULAR_SAMPLE_COUNT; ++s)
+            byteLine[size_t(s)] = static_cast<unsigned char>(
+                std::max(0.0f, std::min(1.0f, line[s])) * 255.0f + 0.5f);
+
+        m_polar->plotDataRange(reinterpret_cast<char*>(byteLine.data()),
+                                m_sweepRing, m_sweepRing, 0, ANGULAR_SAMPLE_COUNT - 1);
+        m_polar->setCurrentSweepRing(m_sweepRing);
+
+        m_rect->plotData(line, 1, ANGULAR_SAMPLE_COUNT, ScrollMode::Direct, m_sweepRing);
+
+        m_sweepRing = (m_sweepRing + 1) % POLAR_HISTORY_DEPTH;
+        if (m_sweepRing == 0)
+            m_polar->initSweepBuffer(POLAR_HISTORY_DEPTH, ANGULAR_SAMPLE_COUNT);
+    }
+
+    m_rectB->plotData(m_normalizedLines.data(), m_numberOfLines, ANGULAR_SAMPLE_COUNT,
                      ScrollMode::PushFromTop, 0);
 
     m_newDataAvailable = false;
@@ -86,22 +113,6 @@ void MainController::normalizeInto(const float* src, int count,
         dst[i] = std::max(0.0f, std::min(1.0f, (src[i] - startRange) / span));
 }
 
-void MainController::pushIntoPolarHistory(const float* normalizedLines, int numberOfLines)
-{
-    if (m_polarHistory.empty())
-        m_polarHistory.assign(size_t(POLAR_HISTORY_DEPTH) * size_t(ANGULAR_SAMPLE_COUNT), 0.0f);
-
-    const int n = std::min(numberOfLines, POLAR_HISTORY_DEPTH);
-    for (int ring = POLAR_HISTORY_DEPTH - 1; ring >= n; --ring)
-        std::copy(m_polarHistory.begin() + size_t(ring - n) * ANGULAR_SAMPLE_COUNT,
-                  m_polarHistory.begin() + size_t(ring - n + 1) * ANGULAR_SAMPLE_COUNT,
-                  m_polarHistory.begin() + size_t(ring) * ANGULAR_SAMPLE_COUNT);
-    for (int i = 0; i < n; ++i)
-        std::copy(normalizedLines + size_t(i) * ANGULAR_SAMPLE_COUNT,
-                  normalizedLines + size_t(i + 1) * ANGULAR_SAMPLE_COUNT,
-                  m_polarHistory.begin() + size_t(i) * ANGULAR_SAMPLE_COUNT);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // SyntheticDataSource — moving pulse
 // Frame N: column (N % ANGULAR_SAMPLE_COUNT) = 100, all others = 0
@@ -110,7 +121,7 @@ SyntheticDataSource::SyntheticDataSource(MainController* ctrl, QObject* parent)
     : QObject(parent), m_ctrl(ctrl)
 {
     m_timer = new QTimer(this);
-    m_timer->setInterval(100);
+    m_timer->setInterval(32);
     connect(m_timer, &QTimer::timeout, this, &SyntheticDataSource::generate);
 }
 
@@ -123,9 +134,12 @@ void SyntheticDataSource::generate()
     const int numberOfLines = 1;
     m_buffer.assign(size_t(numberOfLines) * ANGULAR_SAMPLE_COUNT, m_startRange);
 
-    // One active pulse cell = stopRange value, all others = startRange
-    const int activeCol = m_pulsePos % ANGULAR_SAMPLE_COUNT;
-    m_buffer[size_t(activeCol)] = m_stopRange;
+    // Uniform frame fill: entire band gets one representative value.
+    // No spatial gradient, no moving target — this is raw frame accumulation,
+    // not a simulated echo.
+    const float span  = m_stopRange - m_startRange;
+    const float level = m_startRange + span * (0.4f + 0.5f * float(m_pulsePos % 5) / 4.0f);
+    std::fill(m_buffer.begin(), m_buffer.end(), level);
 
     m_pulsePos = (m_pulsePos + 1) % ANGULAR_SAMPLE_COUNT;
 
@@ -160,8 +174,15 @@ MainWindow::MainWindow(QWidget* parent)
     m_rect->setMaxRange(DATA_MAX);
     m_rect->setLogicalWidth(LOGICAL_WIDTH);
     m_rect->setLogicalHeight(LOGICAL_HEIGHT);
+    m_rectB = new RasterStripWidget;
+    m_rectB->setColorMap(ColorMapType::Green);
+    m_rectB->setDataDimensions(ANGULAR_SAMPLE_COUNT, RECT_HISTORY_ROWS);
+    m_rectB->setMinRange(DATA_MIN);
+    m_rectB->setMaxRange(DATA_MAX);
+    m_rectB->setLogicalWidth(LOGICAL_WIDTH);
+    m_rectB->setLogicalHeight(LOGICAL_HEIGHT);
 
-    m_ctrl       = new MainController(m_polar, m_rect, this);
+    m_ctrl       = new MainController(m_polar, m_rect, m_rectB, this);
     m_dataSource = new SyntheticDataSource(m_ctrl, this);
 
     // ── Layout ────────────────────────────────────────────────────────────
@@ -171,6 +192,7 @@ MainWindow::MainWindow(QWidget* parent)
     QHBoxLayout* vizRow = new QHBoxLayout;
     vizRow->addWidget(m_polar, 1);
     vizRow->addWidget(m_rect,  1);
+    vizRow->addWidget(m_rectB, 1);
     root->addLayout(vizRow, 1);
 
     QHBoxLayout* ctrlRow = new QHBoxLayout;
@@ -204,11 +226,13 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     connect(m_btnReset, &QPushButton::clicked, [this]() {
-        m_polar->resetView();
-        m_rect->resetView();
-        m_ctrl->resetHistory();
-        m_statusLbl->setText("Reset.");
-    });
+            m_polar->resetView();
+            m_rect->resetView();
+            m_rectB->resetView();
+            m_ctrl->resetHistory();
+            m_statusLbl->setText("Reset.");
+        });
+
 }
 
 void MainWindow::refreshStatus()

@@ -24,7 +24,7 @@ public:
     static constexpr int   ANGULAR_SAMPLE_COUNT = 64;
     static constexpr int   RECT_HISTORY_ROWS    = 200;
 
-    MainController(PolarPyWidget* polar, RasterStripWidget* rect, QObject* parent = nullptr);
+    MainController(PolarPyWidget* polar, RasterStripWidget* rect, RasterStripWidget* rectB, QObject* parent = nullptr);
 
     void start();
     void stop();
@@ -39,10 +39,12 @@ public slots:
 private:
     static void normalizeInto(const float* src, int count,
                                float startRange, float stopRange, float* dst);
-    void pushIntoPolarHistory(const float* normalizedLines, int numberOfLines);
 
     PolarPyWidget*     m_polar;
+    int                 m_sweepRing = 0;
+    bool                m_sweepInitialized = false;
     RasterStripWidget* m_rect;
+    RasterStripWidget* m_rectB;
     QTimer*            m_timer = nullptr;
 
     float* m_data             = nullptr;
@@ -93,6 +95,7 @@ public:
 private:
     PolarPyWidget*      m_polar      = nullptr;
     RasterStripWidget*  m_rect       = nullptr;
+    RasterStripWidget*  m_rectB      = nullptr;
     MainController*     m_ctrl       = nullptr;
     SyntheticDataSource* m_dataSource = nullptr;
 

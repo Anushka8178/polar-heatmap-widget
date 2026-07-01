@@ -39,6 +39,7 @@ static void paintExternalSpokeLabels(QPainter& p,
 static void paintCrosshair(QPainter& p,
                             float ox, float oy, float scale,
                             float crossR, float crossTheta,
+                            float startAngle, float endAngle,
                             QPointF cursorPx,
                             int hoveredRing, int hoveredSector,
                             float hoveredValue,
@@ -129,6 +130,13 @@ void PolarPyWidget::plotData(char* data, int radialBins, int angularBins)
     const int total = radialBins * angularBins;
     m_data.resize(total);
     std::memcpy(m_data.data(), data, total);
+        // track last updated angular sector
+        m_lastAngularSector = -1;
+        auto* src = reinterpret_cast<unsigned char*>(data);
+        for (int s = angularBins-1; s >= 0; --s)
+            for (int r = 0; r < radialBins; ++r)
+                if (src[r*angularBins+s] > 0) { m_lastAngularSector = s; goto found_sector; }
+        found_sector:;
     m_vboDirty = true;
     m_pendingRanges.clear();
     update();
@@ -161,6 +169,18 @@ void PolarPyWidget::plotDataRange(char* data, int ringFirst, int ringLast,
         { range.first = std::min(range.first, ringFirst); range.second = std::max(range.second, ringLast); merged = true; break; }
     }
     if (!merged) m_pendingRanges.push_back({ringFirst, ringLast});
+    update();
+}
+
+void PolarPyWidget::initSweepBuffer(int radialBins, int angularBins)
+{
+    if (radialBins <= 0 || angularBins <= 0) return;
+    m_radialBins  = radialBins;
+    m_angularBins = angularBins;
+    m_data.assign(size_t(radialBins) * size_t(angularBins), 0);
+    m_lastAngularSector = -1;
+    m_vboDirty = true;
+    m_pendingRanges.clear();
     update();
 }
 
@@ -508,6 +528,42 @@ void PolarPyWidget::drawOverlay()
     float scale, ox, oy;
     computeDrawBounds(scale, ox, oy);
 
+    // --- Last-updated radial band indicator (drawn first, under grid/labels) ---
+    if (m_currentSweepRing >= 0 && m_radialBins > 0 && m_currentSweepRing < m_radialBins)
+    {
+        painter.save();
+        const float cx = float(m_vpW)*0.5f, cy = float(m_vpH)*0.5f;
+        painter.translate(cx+m_panOffset.x(), cy+m_panOffset.y());
+        painter.scale(double(m_zoom), double(m_zoom));
+        painter.translate(-cx, -cy);
+
+        const float rInner = float(m_currentSweepRing)     / float(m_radialBins);
+        const float rOuter = float(m_currentSweepRing + 1) / float(m_radialBins);
+        const float spanDeg = m_endAngle - m_startAngle;
+
+        QPen hlPen(QColor(255, 220, 0, 230), 2.2);
+        painter.setPen(hlPen);
+        painter.setBrush(Qt::NoBrush);
+
+        auto arcPath = [&](float rNorm) {
+            QPainterPath path;
+            bool first = true;
+            for (int step = 0; step <= GRID_ARC; ++step)
+            {
+                const float angle = qDegreesToRadians(m_startAngle + float(step)/float(GRID_ARC)*spanDeg);
+                const QPointF pt(ox + rNorm*scale*std::cos(angle), oy + rNorm*scale*std::sin(angle));
+                if (first) { path.moveTo(pt); first = false; }
+                else       { path.lineTo(pt); }
+            }
+            return path;
+        };
+
+        painter.drawPath(arcPath(rInner));
+        painter.drawPath(arcPath(rOuter));
+
+        painter.restore();
+    }
+
     painter.save();
     const float cx = float(m_vpW)*0.5f, cy = float(m_vpH)*0.5f;
     painter.translate(cx+m_panOffset.x(), cy+m_panOffset.y());
@@ -517,53 +573,69 @@ void PolarPyWidget::drawOverlay()
     const int   numRings  = 5;
     const int   numSpokes = 8;
     const float spanDeg   = m_endAngle - m_startAngle;
-
-    painter.setPen(QPen(QColor(180,180,180,90), 1.0));
-    for (int ring = 1; ring <= numRings; ++ring)
-    {
-        const float radius = scale * float(ring) / float(numRings);
-        QPainterPath arc;
-        bool first = true;
-        for (int step = 0; step <= GRID_ARC; ++step)
+    painter.setPen(QPen(QColor(180,180,180,140), 1.2));
         {
-            const float angle = qDegreesToRadians(m_startAngle + float(step)/float(GRID_ARC)*spanDeg);
-            const float x = ox + radius*std::cos(angle), y = oy + radius*std::sin(angle);
-            if (first) { arc.moveTo(x,y); first=false; } else arc.lineTo(x,y);
+            const float radius = scale;
+            QPainterPath arc;
+            bool first = true;
+            for (int step = 0; step <= GRID_ARC; ++step)
+            {
+                const float angle = qDegreesToRadians(m_startAngle + float(step)/float(GRID_ARC)*spanDeg);
+                const float x = ox + radius*std::cos(angle), y = oy + radius*std::sin(angle);
+                if (first) { arc.moveTo(x,y); first=false; } else arc.lineTo(x,y);
+            }
+            painter.drawPath(arc);
         }
-        painter.drawPath(arc);
-    }
-
-    for (int s = 0; s <= numSpokes; ++s)
-    {
-        const float angle = qDegreesToRadians(m_startAngle + float(s)/float(numSpokes)*spanDeg);
-        painter.drawLine(QPointF(ox,oy), QPointF(ox+scale*std::cos(angle), oy+scale*std::sin(angle)));
-    }
+        for (int s : {0, numSpokes})
+        {
+            const float angle = qDegreesToRadians(m_startAngle + float(s)/float(numSpokes)*spanDeg);
+            painter.drawLine(QPointF(ox,oy), QPointF(ox+scale*std::cos(angle), oy+scale*std::sin(angle)));
+        }
 
     painter.restore();
-    QFont labelFont2("Sans", 8);
-    painter.setFont(labelFont2);
-    painter.setPen(QColor(200,200,255,200));
-    static const float radialPcts[] = {25.0f, 50.0f, 75.0f, 100.0f};
-    for (float pct : radialPcts)
+    if (m_highlightLastUpdate && m_lastAngularSector >= 0 && m_angularBins > 0)
     {
-        const float radius = scale * (pct/100.0f) * 1.15f;
-        const float valDeg = m_minRange + (m_maxRange-m_minRange)*(pct/100.0f);
-        const float lAngle = qDegreesToRadians(m_startAngle - 6.0f);
-        const float wx = ox + radius*std::cos(lAngle);
-        const float wy = oy + radius*std::sin(lAngle);
-        float lx = (wx-cx)*m_zoom + cx + m_panOffset.x();
-        float ly = (wy-cy)*m_zoom + cy + m_panOffset.y();
-        const QString lbl2 = QString::number(int(valDeg));
-        const QFontMetrics fm2(labelFont2);
-        const int tw2 = fm2.horizontalAdvance(lbl2);
-        lx = std::max(float(tw2), std::min(lx, float(m_vpW - tw2 - 2)));
-        ly = std::max(2.0f, std::min(ly, float(m_vpH - 2)));
-        painter.drawText(QPointF(lx,ly), lbl2);
+            const float cx = float(m_vpW)*0.5f, cy = float(m_vpH)*0.5f;
+            const float spanDeg = m_endAngle - m_startAngle;
+            const float angleDeg = m_startAngle + (float(m_lastAngularSector)+0.5f)/float(m_angularBins)*spanDeg;
+            const float angleRad = qDegreesToRadians(angleDeg);
+            const float wx0 = ox, wy0 = oy;
+            const float wx1 = ox + scale*std::cos(angleRad);
+            const float wy1 = oy + scale*std::sin(angleRad);
+            const float sx0 = (wx0-cx)*m_zoom + cx + m_panOffset.x();
+            const float sy0 = (wy0-cy)*m_zoom + cy + m_panOffset.y();
+            const float sx1 = (wx1-cx)*m_zoom + cx + m_panOffset.x();
+            const float sy1 = (wy1-cy)*m_zoom + cy + m_panOffset.y();
+            painter.setPen(QPen(QColor(255,220,0,230), 2.0, Qt::SolidLine));
+            painter.drawLine(QPointF(sx0,sy0), QPointF(sx1,sy1));
     }
-
-    paintArcScaleLabels(painter, ox, oy, scale,
-                        m_startAngle, m_endAngle, m_minRange, m_maxRange,
-                        m_zoom, m_panOffset, m_vpW, m_vpH);
+    QFont labelFont2("Sans", 8);
+        painter.setFont(labelFont2);
+        const QFontMetrics fm2(labelFont2);
+        const int th2 = fm2.height();
+        const float tickLen2 = 5.0f;
+        static const float radialPcts[] = {0.0f, 25.0f, 50.0f, 75.0f, 100.0f};
+        const float lAngle = qDegreesToRadians(m_startAngle);
+        const float cosA = std::cos(lAngle), sinA = std::sin(lAngle);
+        for (float pct : radialPcts)
+        {
+            const float radius = scale * (pct/100.0f);
+            const float val = m_minRange + (m_maxRange-m_minRange)*(pct/100.0f);
+            const float wx = ox + radius*cosA;
+            const float wy = oy + radius*sinA;
+            float tx = (wx-cx)*m_zoom + cx + m_panOffset.x();
+            float ty = (wy-cy)*m_zoom + cy + m_panOffset.y();
+            const float perpX = -sinA * tickLen2;
+            const float perpY =  cosA * tickLen2;
+            painter.setPen(QPen(QColor(200,200,255,200), 1.5f));
+            painter.drawLine(QPointF(tx, ty), QPointF(tx - perpX, ty - perpY));
+            const QString lbl2 = QString::number(int(std::round(val)));
+            const int tw2 = fm2.horizontalAdvance(lbl2);
+            const float lx = std::max(2.0f, tx - perpX - tw2 - 3.0f);
+            const float ly = std::max(float(th2), std::min(ty - perpY + th2*0.3f, float(m_vpH - 2.0f)));
+            painter.setPen(QColor(200,200,255,200));
+            painter.drawText(QPointF(lx,ly), lbl2);
+        }
     paintExternalSpokeLabels(painter, ox, oy, scale,
                              m_startAngle, m_endAngle, 8,
                              m_zoom, m_panOffset, m_vpW, m_vpH);
@@ -578,36 +650,13 @@ void PolarPyWidget::drawOverlay()
                 hoveredValue = m_minRange + (m_maxRange-m_minRange)*float(m_data[idx])/255.0f;
         }
         paintCrosshair(painter, ox, oy, scale,
-                       m_crosshairR, m_crosshairTheta, m_crosshairPixel,
+                       m_crosshairR, m_crosshairTheta, m_startAngle, m_endAngle, m_crosshairPixel,
                        m_hoveredRing, m_hoveredSector, hoveredValue,
                        m_minRange, m_maxRange,
                        m_zoom, m_panOffset, m_vpW, m_vpH);
     }
 
     if (m_hoveredRing >= 0 && m_hoveredSector >= 0 && !m_data.empty())
-    {
-        const int idx = m_hoveredRing * m_angularBins + m_hoveredSector;
-        if (idx >= 0 && idx < int(m_data.size()))
-        {
-            const float mapped = m_minRange + (m_maxRange-m_minRange)*float(m_data[idx])/255.0f;
-            const QString tip  = QString("Ring %1 | Sec %2 | %3")
-                .arg(m_hoveredRing).arg(m_hoveredSector)
-                .arg(QString::number(double(mapped), 'f', 1));
-            const QFont tipFont("Sans", 9);
-            const QFontMetrics fm(tipFont);
-            const QRect bounds = fm.boundingRect(tip);
-            int tx = m_hoverPixel.x() + 14;
-            int ty = m_hoverPixel.y() - 6;
-            tx = std::min(tx, m_vpW - bounds.width() - 10);
-            ty = std::max(ty, bounds.height() + 4);
-            painter.setFont(tipFont);
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(QColor(20,20,20,200));
-            painter.drawRoundedRect(tx-4, ty-bounds.height()-2, bounds.width()+10, bounds.height()+6, 4, 4);
-            painter.setPen(Qt::white);
-            painter.drawText(tx, ty, tip);
-        }
-    }
 
     if (!m_errorMsg.empty())
     {
@@ -695,6 +744,7 @@ void PolarPyWidget::mouseMoveEvent(QMouseEvent* e)
     pixelToPolar(pos, r, theta);
     m_crosshairR     = r;
     m_crosshairTheta = theta;
+    emit positionHovered(r, theta);
 
     int ring = -1, sector = -1;
     if (pixelToPolar(pos, r, theta) && polarToCell(r, theta, ring, sector))
@@ -834,42 +884,53 @@ static void paintArcScaleLabels(QPainter& p,
         p.drawText(-tw/2, 0, lbl); p.restore();
     }
 }
-
 static void paintExternalSpokeLabels(QPainter& p,
                                       float ox, float oy, float scale,
                                       float startAngle, float endAngle,
                                       int numSpokes,
                                       float zoom, QPointF panOffset,
                                       int vpW, int vpH)
+
 {
-    const float radius = scale * 1.12f;
     const float spanDeg = endAngle - startAngle;
     const float cx = float(vpW)*0.5f, cy = float(vpH)*0.5f;
+    const float tickLen = 5.0f;
     QFont f("Sans", 8);
     p.setFont(f);
-    p.setPen(QColor(200,200,255,200));
     const QFontMetrics fm(f);
+    const int th = fm.height();
     for (int s = 0; s <= numSpokes; ++s)
     {
         const float angleDeg = startAngle + float(s)/float(numSpokes)*spanDeg;
         const float displayDeg = angleDeg + 90.0f;
         const float angleRad = qDegreesToRadians(angleDeg);
-        const float wx = ox + radius*std::cos(angleRad);
-        const float wy = oy + radius*std::sin(angleRad);
-        float lx = (wx-cx)*zoom + cx + panOffset.x();
-        float ly = (wy-cy)*zoom + cy + panOffset.y();
-        const QString lbl = QString("%1\u00B0").arg(int(std::round(displayDeg)));
-        const int tw = fm.horizontalAdvance(lbl), th = fm.height();
-        lx -= tw*0.5f; ly += th*0.25f;
+        const float cosA = std::cos(angleRad), sinA = std::sin(angleRad);
+        // tick: from arc edge outward
+        const float ix1 = ox + scale*cosA;
+        const float iy1 = oy + scale*sinA;
+        const float ix2 = ox + (scale+tickLen)*cosA;
+        const float iy2 = oy + (scale+tickLen)*sinA;
+        float sx1 = (ix1-cx)*zoom+cx+panOffset.x();
+        float sy1 = (iy1-cy)*zoom+cy+panOffset.y();
+        float sx2 = (ix2-cx)*zoom+cx+panOffset.x();
+        float sy2 = (iy2-cy)*zoom+cy+panOffset.y();
+        p.setPen(QPen(QColor(200,200,255,200), 1.5f));
+        p.drawLine(QPointF(sx1,sy1), QPointF(sx2,sy2));
+        // label flush outside tick
+        const QString lbl = QString("%1°").arg(int(std::round(displayDeg)));
+        const int tw = fm.horizontalAdvance(lbl);
+        float lx = sx2 + (sx2-sx1)/tickLen * 4.0f - tw*0.5f;
+        float ly = sy2 + (sy2-sy1)/tickLen * 4.0f + th*0.3f;
         lx = std::max(2.0f, std::min(lx, float(vpW-tw-2)));
         ly = std::max(float(th), std::min(ly, float(vpH-2)));
+        p.setPen(QColor(200,200,255,200));
         p.drawText(QPointF(lx,ly), lbl);
     }
 }
-
 static void paintCrosshair(QPainter& p,
                             float ox, float oy, float scale,
                             float crossR, float crossTheta,
+                            float startAngle, float endAngle,
                             QPointF cursorPx,
                             int hoveredRing, int hoveredSector,
                             float hoveredValue,
@@ -890,27 +951,71 @@ static void paintCrosshair(QPainter& p,
 //    p.drawLine(originPx, outerPx);
     p.setPen(QPen(QColor(0,220,255,100), 1.0, Qt::DotLine));
     const float ringRadius = std::hypot(double(cursorPx.x()-originPx.x()), double(cursorPx.y()-originPx.y()));
-    p.drawEllipse(originPx, double(ringRadius), double(ringRadius));
-    p.drawLine(QPointF(cursorPx.x(),0), QPointF(cursorPx.x(),float(vpH)));
-    QString info;
-    if (hoveredRing >= 0 && hoveredSector >= 0)
-        info = QString("R%1 S%2  val=%3  r=%4  \u03B8=%5\u00B0")
-            .arg(hoveredRing,2,10,QLatin1Char('0')).arg(hoveredSector,2,10,QLatin1Char('0'))
-            .arg(hoveredValue,0,'f',1).arg(crossR,0,'f',3).arg(crossTheta,0,'f',1);
-    else
-        info = QString("r=%1  \u03B8=%2\u00B0").arg(crossR,0,'f',3).arg(crossTheta,0,'f',1);
-    QFont f("Monospace", 8);
-    p.setFont(f);
-    const QFontMetrics fm(f);
-    const int tw = fm.horizontalAdvance(info), th = fm.height();
-    int ix = int(cursorPx.x())+16, iy = int(cursorPx.y())-6;
-    ix = std::min(ix, vpW-tw-6); iy = std::max(iy, th+2);
-    p.setPen(Qt::NoPen); p.setBrush(QColor(0,0,0,170));
-    p.drawRoundedRect(ix-3, iy-th, tw+8, th+4, 3, 3);
-    p.setPen(QColor(0,220,255,240));
-    p.drawText(ix, iy, info);
-    Q_UNUSED(minRange); Q_UNUSED(maxRange);
-}
+    QPainterPath arcPath;
+    const int arcSteps = 48;
+    for (int s = 0; s <= arcSteps; ++s)
+    {
+        const float ad = startAngle + float(s)/float(arcSteps)*(endAngle-startAngle);
+        const QPointF pt = originPx + QPointF(ringRadius*std::cos(qDegreesToRadians(ad)), ringRadius*std::sin(qDegreesToRadians(ad)));
+        if (s==0) arcPath.moveTo(pt); else arcPath.lineTo(pt);
+    }
+    p.drawPath(arcPath);
+    p.drawLine(originPx, outerPx);
+    // small white dot at cursor position
+    // small white dot at cursor position
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255,255,255,220));
+        p.drawEllipse(cursorPx, 3.5, 3.5);
+
+        // coordinate boxes matching raster style
+        QFont cf("Sans", 8);
+        p.setFont(cf);
+        const QFontMetrics cfm(cf);
+        const int cth = cfm.height();
+
+        // Range label on left boundary spoke at crossR
+        {
+            const float dispRange = minRange + crossR * (maxRange - minRange);
+            const QString rlbl = QString::number(int(std::round(dispRange)));
+            const int tw = cfm.horizontalAdvance(rlbl);
+            const float lAngle = qDegreesToRadians(startAngle);
+            const QPointF rpt = toScreen(crossR, lAngle);
+            float lx = rpt.x() - tw - 8.0f;
+            float ly = rpt.y() + cth*0.3f;
+            lx = std::max(2.0f, lx);
+            ly = std::max(float(cth), std::min(ly, float(vpH-2)));
+            p.setPen(QPen(QColor(0,220,255,240), 1.5f));
+            p.drawLine(QPointF(rpt.x(), rpt.y()), QPointF(rpt.x()-5.0f, rpt.y()));
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(60,60,60,200));
+            p.drawRect(QRectF(lx-3, ly-cth, tw+6.0f, cth+4.0f));
+            p.setPen(QColor(0,220,255,240));
+            p.drawText(QPointF(lx, ly), rlbl);
+        }
+
+        // Angle label on outer arc at crossTheta
+        // Angle label on outer arc at crossTheta
+                {
+                    const float dispTheta = crossTheta + 90.0f;
+                    const float clampedTheta = dispTheta > 180.0f ? dispTheta - 360.0f : dispTheta;
+                    const QString tlbl = QString("%1°").arg(clampedTheta, 0, 'f', 1);
+                    const int tw = cfm.horizontalAdvance(tlbl);
+                    const QPointF arcPt = toScreen(1.0f, angleRad);
+                    // label position: directly outside arc, no line
+                    float lx = arcPt.x() - tw*0.5f;
+                    float ly = arcPt.y() - cth*1.5f;
+                    // only show if inside widget bounds
+                    if (lx > 2.0f && lx+tw < float(vpW-2) && ly > float(cth) && ly < float(vpH-2))
+                    {
+                        p.setPen(Qt::NoPen);
+                        p.setBrush(QColor(60,60,60,200));
+                        p.drawRect(QRectF(lx-3, ly-cth, tw+6.0f, cth+4.0f));
+                        p.setPen(QColor(0,220,255,240));
+                        p.drawText(QPointF(lx, ly), tlbl);
+                    }
+                }
+        Q_UNUSED(hoveredRing); Q_UNUSED(hoveredSector); Q_UNUSED(hoveredValue);
+    }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Markers

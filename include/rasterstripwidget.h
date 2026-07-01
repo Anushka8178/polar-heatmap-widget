@@ -35,6 +35,8 @@ public:
     void setDataDimensions(int dataWidth, int dataHeight);
     void clearMarkers() { m_markers.clear(); update(); }
     void setMiniMarkerScale(float s) { m_miniMarkerScale = std::max(0.01f, s); }
+    void setHighlightLastUpdate(bool on) { m_highlightLastUpdate = on; update(); }
+    bool highlightLastUpdate() const { return m_highlightLastUpdate; }
 
     void plotData(const float* rows, int rowCount, int cols,
                   ScrollMode mode = ScrollMode::PushFromTop, int targetRow = 0);
@@ -44,6 +46,7 @@ public:
     void setMinRange(float v) { m_minRange = v; update(); }
     void setMaxRange(float v) { m_maxRange = v; update(); }
     void setLogicalWidth(float w)  { m_logicalWidth  = w; update(); }
+    void setLastUpdateHighlight(bool on) { m_highlightLastUpdate = on; update(); }
     void setLogicalHeight(float h) { m_logicalHeight = h; update(); }
 
     void setColorMap(ColorMapType type);
@@ -84,7 +87,7 @@ private:
 
     ColorMap m_colorMap{ColorMapType::Green};  // Req 3
     float m_minRange = 0.0f;
-    float m_maxRange = 255.0f;
+    float m_maxRange = 100.0f;
     float m_logicalWidth  = 1000.0f;
     float m_logicalHeight = 600.0f;
 
@@ -99,6 +102,9 @@ private:
     int  m_hoveredRow = -1;
     int  m_hoveredCol = -1;
     bool m_hoverValid = false;
+    bool m_highlightLastUpdate = true;
+    int  m_lastRowStart = -1;
+    int  m_lastRowCount = 0;
 
     std::vector<RasterMarker> m_markers;
     float m_miniMarkerScale = 0.5f;

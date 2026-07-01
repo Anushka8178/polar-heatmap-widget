@@ -68,10 +68,14 @@ public:
     void setLogicalThetaScale(float scale);
     float logicalThetaScale() const;
     void setMiniMarkerScale(float s);
+    void setLastUpdateHighlight(bool on) { m_highlightLastUpdate = on; update(); }
 
     void plotData(const float* data, int radialBins, int angularBins);
     void plotData(char* data, int radialBins, int angularBins);
     void plotDataRange(char* data, int ringFirst, int ringLast, int secFirst, int secLast);
+    void initSweepBuffer(int radialBins, int angularBins);
+    void setCurrentSweepRing(int ring) { m_currentSweepRing = ring; update(); }
+    int  currentSweepRing() const { return m_currentSweepRing; }
 
     static QColor mapValueToColor(int value);
     static std::vector<unsigned char> generateTestData(int rows, int cols);
@@ -80,14 +84,14 @@ public:
     void setMaxRange(float value);
     void setStartAngle(float deg);
     void setEndAngle(float deg);
-
-    float minRange() const { return m_minRange; }
-    float maxRange() const { return m_maxRange; }
-    float startAngle() const { return m_startAngle; }
-    float endAngle() const { return m_endAngle; }
-
-    void setColorMap(ColorMapType type);
+    float minRange()    const { return m_minRange; }
+    float maxRange()    const { return m_maxRange; }
+    float startAngle()  const { return m_startAngle; }
+    float endAngle()    const { return m_endAngle; }
+    int   radialBins()  const { return m_radialBins; }
+    int   angularBins() const { return m_angularBins; }
     void setColorMap(const ColorMap& map);
+    void setColorMap(ColorMapType type);
     void setColorMapPreset(ColorMapType type) { setColorMap(type); }
     bool setCustomColorMap(const QString& jsonFilePath, std::string* errorOut = nullptr);
     const ColorMap& colorMap() const { return m_colorMap; }
@@ -102,6 +106,7 @@ public:
 
 signals:
     void sectorHovered(int ring, int sector, int rawValue);
+    void positionHovered(float r, float theta);
     void sectorSelected(int ring, int sector, int rawValue);
     void tooltipUpdated(const TooltipData& tooltip);
 
@@ -146,6 +151,7 @@ private:
     int m_angularBins = 0;
 
     std::vector<std::pair<int,int>> m_pendingRanges;
+    int m_currentSweepRing = -1;
     bool m_vboDirty = true;
 
     float m_minRange    = 0.0f;
@@ -192,6 +198,8 @@ private:
 
     std::vector<PolarMarker> m_markers;
     float m_miniMarkerScale = 0.01f;
+    int  m_lastAngularSector = -1;
+    bool m_highlightLastUpdate = true;
 
     float m_logicalThetaScale = 1.0f;
     bool  m_cumulativeMode    = false;
